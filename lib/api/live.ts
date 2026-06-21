@@ -35,7 +35,22 @@ import {
   BackendPolicy,
 } from './types'
 
-const BASE = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4000'
+function getCoreApiUrl(): string {
+  const url = process.env.NEXT_PUBLIC_CORE_API_URL
+  if (url) return url
+
+  const isMockMode = process.env.NEXT_PUBLIC_MOCK_MODE === 'true'
+  if (!isMockMode) {
+    console.warn(
+      '⚠️ NEXT_PUBLIC_CORE_API_URL is missing in live mode.\n' +
+      'Falling back to http://localhost:4000.\n' +
+      'To silence this warning, set NEXT_PUBLIC_CORE_API_URL in your .env.local file.'
+)
+}
+return 'http://localhost:4000'
+}
+
+const BASE = getCoreApiUrl()
 
 /** Thrown when the backend returns HTTP 401 (expired / invalid session token). */
 export class AuthError extends Error {
@@ -83,66 +98,66 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
 // If the backend ever aligns its field names with the frontend types, the
 // mapper becomes a no-op and can be removed without touching call sites.
 
-function mapCommunity(raw: BackendSession['community']): Community {
+function mapCommunity(raw: any): Community {
   return {
-    id: raw.id,
-    name: raw.name,
-    description: raw.description,
-    tiers: raw.tiers ?? ['free', 'standard', 'pro'],
+    id: raw?.id ?? '',
+    name: raw?.name ?? '',
+    description: raw?.description,
+    tiers: raw?.tiers ?? ['free', 'standard', 'pro'],
   }
 }
 
-function mapMembership(raw: BackendMember): Membership {
+function mapMembership(raw: any): Membership {
   return {
-    address: raw.address ?? raw.wallet_address,
-    tier: raw.tier ?? raw.membership_tier ?? 'free',
-    active: raw.active ?? raw.is_active ?? false,
-    expiresAt: raw.expiresAt ?? raw.expires_at,
+    address: raw?.address ?? raw?.wallet_address ?? '',
+    tier: raw?.tier ?? raw?.membership_tier ?? 'free',
+    active: raw?.active ?? raw?.is_active ?? false,
+    expiresAt: raw?.expiresAt ?? raw?.expires_at,
   }
 }
 
-function mapMemberProfile(raw: BackendMember, address: string): MemberProfile {
+function mapMemberProfile(raw: any, address: string): MemberProfile {
   return {
     address,
-    displayName: raw.displayName ?? raw.display_name ?? raw.username,
-    bio: raw.bio,
-    badges: raw.badges ?? [],
+    displayName: raw?.displayName ?? raw?.display_name ?? raw?.username ?? '',
+    bio: raw?.bio,
+    badges: raw?.badges ?? [],
   }
 }
 
-function mapMemberRow(raw: BackendMember): MemberRow {
+function mapMemberRow(raw: any): MemberRow {
   return {
-    address: raw.address ?? raw.wallet_address,
-    roles: raw.roles ?? [],
-    tier: raw.tier ?? raw.membership_tier ?? 'free',
-    active: raw.active ?? raw.is_active ?? false,
+    address: raw?.address ?? raw?.wallet_address ?? '',
+    roles: raw?.roles ?? [],
+    tier: raw?.tier ?? raw?.membership_tier ?? 'free',
+    active: raw?.active ?? raw?.is_active ?? false,
   }
 }
 
-function mapResource(raw: BackendResource): Resource {
+function mapResource(raw: any): Resource {
   return {
-    id: raw.id,
-    title: raw.title ?? raw.name,
-    description: raw.description,
-    minTier: raw.minTier ?? raw.min_tier,
-    roles: raw.roles,
+    id: raw?.id ?? '',
+    title: raw?.title ?? raw?.name ?? '',
+    description: raw?.description,
+    minTier: raw?.minTier ?? raw?.min_tier ?? 'free',
+    roles: raw?.roles,
   }
 }
 
-function mapPolicy(raw: BackendPolicy): AccessPolicy {
+function mapPolicy(raw: any): AccessPolicy {
   return {
-    resourceId: raw.resourceId ?? raw.resource_id,
-    minTier: raw.minTier ?? raw.min_tier,
-    roles: raw.roles,
+    resourceId: raw?.resourceId ?? raw?.resource_id ?? '',
+    minTier: raw?.minTier ?? raw?.min_tier ?? 'free',
+    roles: raw?.roles ?? [],
   }
 }
 
-function mapSession(raw: BackendSession): Session {
+function mapSession(raw: any): Session {
   return {
-    address: raw.address ?? raw.wallet_address,
-    roles: raw.roles ?? [],
-    membership: raw.membership ? mapMembership(raw.membership as BackendMember) : undefined,
-    community: raw.community ? mapCommunity(raw.community) : undefined,
+    address: raw?.address ?? raw?.wallet_address ?? '',
+    roles: raw?.roles ?? [],
+    membership: raw?.membership ? mapMembership(raw.membership) : undefined,
+    community: raw?.community ? mapCommunity(raw.community) : undefined,
   }
 }
 
