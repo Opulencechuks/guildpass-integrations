@@ -395,6 +395,16 @@ export class LiveAccessApi implements AccessApi {
     })
   }
 
+  async removeRole(address: string, role: Role): Promise<void> {
+    await getJson<void>(
+      `/v1/members/${encodeURIComponent(address)}/roles/${encodeURIComponent(role)}`,
+      {
+        method: 'DELETE',
+        headers: this.authHeaders(),
+      },
+    )
+  }
+
   async updatePolicy(policy: AccessPolicy): Promise<void> {
     const result = validatePolicy(policy)
 

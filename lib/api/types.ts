@@ -215,6 +215,8 @@ export interface AccessApi {
   // ── Admin queries & mutations (require a valid SIWE token context) ────────
   listWebhookEvents(): Promise<WebhookEventLog[]>
   assignRole(address: string, role: Role): Promise<void>
+  removeRole(address: string, role: Role): Promise<void>
+  verifyWallet(address: string): Promise<WalletVerification>
   updatePolicy(policy: AccessPolicy): Promise<void>
 
   // ── SIWE authentication endpoints ────────────────────────────────────────

@@ -109,6 +109,44 @@ export default function MembersPage() {
     },
   })
 
+  const removeRoleMutation = useMutation<
+    void,
+    unknown,
+    AssignRoleInput,
+    AssignRoleRollback
+  >({
+    mutationFn: (input) =>
+      getApi(address, authSession?.token).removeRole(input.address, input.role),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: ['members'] })
+      const previousMembers = qc.getQueryData<MemberRow[]>(['members'])
+      setPendingAssignment(input)
+      setSuccessMessage('')
+      setRollbackMessage('')
+      setSessionExpired(false)
+      qc.setQueryData<MemberRow[]>(['members'], (currentMembers) =>
+        applyOptimisticRemoveRole(currentMembers, input.address, input.role),
+      )
+      return { previousMembers }
+    },
+    onSuccess: (_data, input) => {
+      setSuccessMessage(`Role "${input.role}" removed from ${input.address}.`)
+      resetMutation()
+    },
+    onError: (err: unknown, _input, context) => {
+      qc.setQueryData(['members'], context?.previousMembers)
+      setRollbackMessage(`Change reverted: ${safeErrorMessage(err)}`)
+      if (err instanceof AuthError) {
+        setSessionExpired(true)
+        markExpired()
+      }
+    },
+    onSettled: () => {
+      setPendingAssignment(null)
+      qc.invalidateQueries({ queryKey: ['members'] })
+    },
+  })
+
   return (
     <AdminGuard>
       <div className="space-y-4">
@@ -191,7 +229,22 @@ export default function MembersPage() {
                   >
                     <AddressText address={m.address} className="text-sm" />
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>Tier: {m.tier} • Roles: {m.roles.join(', ')}</span>
+                      <span>Tier: {m.tier}</span>
+                      <div className="flex gap-1">
+                        {m.roles.map((r) => (
+                          <Badge
+                            key={r}
+                            variant="default"
+                            className="cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
+                            onClick={() =>
+                              removeRoleMutation.mutate({ address: m.address, role: r })
+                            }
+                            title={`Remove ${r} role`}
+                          >
+                            {r} ✕
+                          </Badge>
+                        ))}
+                      </div>
                       {pendingAssignment?.address.toLowerCase() === m.address.toLowerCase() && (
                         <Badge variant="warning">Saving</Badge>
                       )}
