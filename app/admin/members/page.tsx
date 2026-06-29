@@ -90,6 +90,33 @@ export default function MembersPage() {
   const normalizedAddr = normalizeAddress(addr);
   const isValidAddress = isWalletAddress(normalizedAddr);
 
+  // Filter state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [roleFilter, setRoleFilter] = useState<Role | 'all'>('all')
+  const [tierFilter, setTierFilter] = useState<MembershipTier | 'all'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+
+  const resetFilters = () => {
+    setSearchQuery('')
+    setRoleFilter('all')
+    setTierFilter('all')
+    setStatusFilter('all')
+  }
+
+  const filteredMembers = members?.filter((m) => {
+    const matchesSearch = !searchQuery || m.address.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesRole = roleFilter === 'all' || m.roles.includes(roleFilter)
+    const matchesTier = tierFilter === 'all' || m.tier === tierFilter
+    const matchesStatus =
+      statusFilter === 'all' ||
+      (statusFilter === 'active' && m.active) ||
+      (statusFilter === 'inactive' && !m.active)
+
+    return matchesSearch && matchesRole && matchesTier && matchesStatus
+  })
+
+  const isFiltered = searchQuery || roleFilter !== 'all' || tierFilter !== 'all' || statusFilter !== 'all'
+
   const {
     mutate,
     isPending,
@@ -262,6 +289,11 @@ export default function MembersPage() {
                 .
               </div>
             )}
+            {successMessage && (
+              <div className="text-sm text-green-700 dark:text-green-400" role="status">
+                {successMessage}
+              </div>
+            )}
             {rollbackMessage && (
               <div className="text-sm text-destructive" role="alert">
                 {rollbackMessage}
@@ -297,7 +329,7 @@ export default function MembersPage() {
               />
             ) : (
               <div className="space-y-2">
-                {members.map((m) => (
+                {filteredMembers.map((m) => (
                   <div
                     key={m.address}
                     className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"
