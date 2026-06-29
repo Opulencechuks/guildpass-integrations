@@ -34,6 +34,8 @@ import {
   validateMemberRowsResponse,
   validateMembershipResponse,
   validatePoliciesResponse,
+  validatePolicyResponse,
+  validateResourceResponse,
   validateResourcesResponse,
   validateSessionResponse,
   validateWebhookEventsResponse,
@@ -257,6 +259,7 @@ export class LiveAccessApi implements AccessApi {
     const session = mapSession(raw)
 
     if (this.address) {
+      const mPath = `/api/integration/membership?address=${encodeURIComponent(this.address)}`
       try {
         const integrationPath = `/api/integration/membership?address=${encodeURIComponent(this.address)}`
         const integrationMembership = await getIntegrationJson<BackendMember | null>(
@@ -324,11 +327,39 @@ export class LiveAccessApi implements AccessApi {
   }
 
   async getResource(id: string): Promise<Resource | null> {
+    const path = `/v1/resources/${encodeURIComponent(id)}`
+    try {
+      const raw = await getJson<BackendResource>(path)
+      if (raw && Object.keys(raw).length > 0) {
+        validateResourceResponse(raw, path)
+        return mapResource(raw)
+      }
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 404)) {
+        throw err
+      }
+    }
+
+    // Fallback for older backends or if direct lookup returned empty/404
     const list = await this.listResources()
     return list.find((r) => r.id === id) ?? null
   }
 
   async getPolicy(resourceId: string): Promise<AccessPolicy | null> {
+    const path = `/v1/policies/${encodeURIComponent(resourceId)}`
+    try {
+      const raw = await getJson<BackendPolicy>(path)
+      if (raw && Object.keys(raw).length > 0) {
+        validatePolicyResponse(raw, path)
+        return mapPolicy(raw)
+      }
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 404)) {
+        throw err
+      }
+    }
+
+    // Fallback for older backends or if direct lookup returned empty/404
     const list = await this.listPolicies()
     return list.find((p) => p.resourceId === resourceId) ?? null
   }
