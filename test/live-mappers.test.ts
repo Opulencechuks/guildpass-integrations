@@ -208,7 +208,6 @@ describe('mapResource', () => {
       description: 'How-to',
       minTier: 'pro',
       roles: ['admin'],
-      content: undefined,
     })
   })
 
@@ -220,7 +219,6 @@ describe('mapResource', () => {
       description: 'Docs',
       minTier: 'standard',
       roles: ['moderator'],
-      content: undefined,
     })
   })
 
@@ -231,7 +229,6 @@ describe('mapResource', () => {
       description: undefined,
       minTier: undefined,
       roles: [],
-      content: undefined,
     })
   })
 })
