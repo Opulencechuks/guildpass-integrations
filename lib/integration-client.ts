@@ -59,6 +59,7 @@ async function createIntegrationClient() {
 
   let clientModule: IntegrationClientModule
   try {
+    // @ts-ignore
     clientModule = (await import('@guildpass/integration-client')) as IntegrationClientModule
   } catch (error: any) {
     if (error.code === 'MODULE_NOT_FOUND') {
@@ -127,7 +128,7 @@ export async function verifyWallet(address: string): Promise<WalletVerification>
  * Does not expose the key value.
  */
 export function isGatewayConfigured(): boolean {
-  return Boolean(process.env.INTEGRATION_API_KEY)
+  return Boolean(process.env.INTEGRATION_API_KEY?.trim())
 }
 
 /**

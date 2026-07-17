@@ -12,7 +12,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { AdminGuard } from "@/components/admin-guard";
 import { useSiweAuth } from "@/lib/wallet/providers";
 import { AuthError } from "@/lib/api/live";
-import { queryKeys } from "@/lib/query";
+import { queryKeys, reconcileMemberRoleCache } from "@/lib/query";
 import {
   LoadingState,
   ErrorState,
@@ -281,6 +281,11 @@ export default function MembersPage() {
       return { previousQueries };
     },
     onSuccess: (_data, input) => {
+      reconcileMemberRoleCache(qc, {
+        address: input.address,
+        role: input.role,
+        action: "assign",
+      });
       setSuccessAssignment(input);
       setAddr("");
       resetMutation();
@@ -291,6 +296,7 @@ export default function MembersPage() {
           qc.setQueryData(queryKey, oldData);
         }
       }
+      void qc.invalidateQueries({ queryKey: queryKeys.members.all });
       setRollbackMessage(`Change reverted: ${safeErrorMessage(err)}`);
       if (err instanceof AuthError) {
         setSessionExpired(true);
@@ -299,7 +305,6 @@ export default function MembersPage() {
     },
     onSettled: () => {
       setPendingAssignment(null);
-      qc.invalidateQueries({ queryKey: queryKeys.members.all });
     },
   });
 
@@ -337,6 +342,11 @@ export default function MembersPage() {
       return { previousQueries };
     },
     onSuccess: (_data, input) => {
+      reconcileMemberRoleCache(qc, {
+        address: input.address,
+        role: input.role,
+        action: "remove",
+      });
       setSuccessMessage(`Role "${input.role}" removed from ${input.address}.`);
       resetMutation();
     },
@@ -346,6 +356,7 @@ export default function MembersPage() {
           qc.setQueryData(queryKey, oldData);
         }
       }
+      void qc.invalidateQueries({ queryKey: queryKeys.members.all });
       setRollbackMessage(`Change reverted: ${safeErrorMessage(err)}`);
       if (err instanceof AuthError) {
         setSessionExpired(true);
@@ -354,7 +365,6 @@ export default function MembersPage() {
     },
     onSettled: () => {
       setPendingAssignment(null);
-      qc.invalidateQueries({ queryKey: queryKeys.members.all });
     },
   });
 
