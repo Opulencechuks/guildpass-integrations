@@ -17,6 +17,7 @@
     "../lib/api/mock.ts",
     "../lib/wallet/address.ts",
     "../lib/wallet/connectors.ts",
+    "../lib/wallet/siwe-session.ts",
     "../lib/config.ts",
     "../lib/features.ts",
     "../components/feature-gate.tsx",
