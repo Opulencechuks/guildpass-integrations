@@ -26,6 +26,8 @@
     "../lib/features.ts",
     "../components/feature-gate.tsx",
     "../components/wallet/address-text.tsx",
+    "../components/nav.tsx",
+    "../app/admin/analytics/page.tsx",
     "../lib/query/*.ts",
     "../types/**/*.d.ts",
     "./*.test.ts",
