@@ -48,7 +48,6 @@
 import {
   createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useReducer,
@@ -98,6 +97,10 @@ type AuthBroadcastMessage =
 const AUTH_CHANNEL_NAME = 'guildpass:auth'
 
 // ── SIWE Auth Context ─────────────────────────────────────────────────────────
+//
+// The context, its type, and the useSiweAuth hook live in
+// '@/lib/wallet/siwe-context' so they can be imported without pulling in the
+// wagmi/wallet stack. This provider supplies the value.
 
 export interface SiweAuthContextValue {
   /** The authenticated session, or null if the user has not signed in. */
