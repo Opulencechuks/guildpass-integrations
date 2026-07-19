@@ -42,6 +42,7 @@ import {
   SiweAuthSession,
   WalletVerification,
   WebhookEventLog,
+  WebhookEventUnsubscribe,
 } from './types'
 import { ApiError } from './errors'
 import {
@@ -260,6 +261,23 @@ let policies: AccessPolicy[] = [...DEFAULT_POLICIES]
 let mockWebhookEvents: WebhookEventLog[] = [...DEFAULT_WEBHOOK_EVENTS]
 let memberStore: Record<string, { membership: Membership; roles: Role[]; profile: MemberProfile }> = { ...DEFAULT_MEMBER_STORE }
 
+function createMockStreamEvent(): WebhookEventLog {
+  const base = DEFAULT_WEBHOOK_EVENTS[Math.floor(Math.random() * DEFAULT_WEBHOOK_EVENTS.length)]
+  const statuses: WebhookEventLog['status'][] = ['success', 'pending', 'failed']
+  const event: WebhookEventLog = {
+    ...base,
+    id: `stream_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    timestamp: new Date().toISOString(),
+    status: statuses[Math.floor(Math.random() * statuses.length)],
+    isReplay: false,
+    fullPayload: {
+      ...(base.fullPayload ?? base.payloadSummary),
+      source: 'mock-sse-stream',
+    },
+  }
+  mockWebhookEvents.unshift(event)
+  return event
+}
 let saveTimeout: ReturnType<typeof setTimeout> | null = null
 
 const initPromise = loadPersistedState().then((persisted) => {
@@ -618,6 +636,15 @@ export class MockAccessApi implements AccessApi {
   async listWebhookEvents(): Promise<WebhookEventLog[]> {
     await initPromise
     return new Promise((resolve) => setTimeout(() => resolve(mockWebhookEvents), 300))
+  }
+
+  subscribeWebhookEvents(onEvent: (event: WebhookEventLog) => void): WebhookEventUnsubscribe {
+    const intervalId = globalThis.setInterval(() => {
+      onEvent(createMockStreamEvent())
+    }, 5000)
+
+    globalThis.setTimeout(() => onEvent(createMockStreamEvent()), 1000)
+    return () => globalThis.clearInterval(intervalId)
   }
 
   /**
