@@ -20,6 +20,7 @@ import {
   DeniedState,
   safeErrorMessage,
 } from "@/components/ui/api-states";
+import { usePagination } from "@/lib/hooks/usePagination";
 import {
   applyOptimisticRole,
   applyOptimisticRemoveRole,
@@ -158,12 +159,14 @@ export default function MembersPage() {
   const [roleFilter, setRoleFilter] = useState<Role | 'all'>('all')
   const [tierFilter, setTierFilter] = useState<MembershipTier | 'all'>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [pageSize, setPageSize] = useState(25)
 
   const resetFilters = () => {
     setSearchQuery('')
     setRoleFilter('all')
     setTierFilter('all')
     setStatusFilter('all')
+    setPageSize(25)
   }
 
   const {
@@ -239,6 +242,20 @@ export default function MembersPage() {
       return matchesSearch && matchesRole && matchesTier && matchesStatus;
     });
   }, [allFetchedMembers, isFallbackMode, searchQuery, roleFilter, tierFilter, statusFilter]);
+
+  const {
+    paginatedItems,
+    currentPage,
+    totalPages,
+    nextPage,
+    prevPage,
+    setPage,
+    setCurrentPage,
+  } = usePagination(filteredMembers, pageSize);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, roleFilter, tierFilter, statusFilter, pageSize, setCurrentPage]);
 
   const isFiltered = searchQuery || roleFilter !== 'all' || tierFilter !== 'all' || statusFilter !== 'all'
 
@@ -509,50 +526,70 @@ export default function MembersPage() {
                 title="No members yet"
                 message="No members have been added to this community."
               />
-            ) : (
-              <div className="space-y-2">
-                <VirtualList
-                  items={filteredMembers}
-                  rowHeight={88}
-                  height={500}
-                  onScrollToBottom={handleScrollToBottom}
-                  renderRow={(m) => (
-                    <div
-                      key={m.address}
-                      className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between h-full bg-card"
-                    >
-                      <AddressText address={m.address} className="text-sm" />
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span>Tier: {m.tier}</span>
-                        <div className="flex flex-wrap gap-1">
-                          {m.roles.map((r) => (
-                            <button
-                              key={r}
-                              type="button"
-                              className="inline-flex items-center rounded-md border border-transparent bg-secondary px-2 py-0.5 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                              onClick={() => requestRoleRemoval(m, r)}
-                              aria-label={`Remove ${r} role from ${m.address}`}
-                              title={`Remove ${r} role`}
-                            >
-                              {r} <span aria-hidden="true">✕</span>
-                            </button>
-                          ))}
-                        </div>
-                        {pendingAssignment?.address.toLowerCase() ===
-                          m.address.toLowerCase() && (
-                          <Badge variant="warning">Saving</Badge>
-                        )}
-                      </div>
+             ) : (
+               <div className="space-y-4">
+                 <div className="space-y-2">
+                   {paginatedItems.map((m) => (
+                     <div
+                       key={m.address}
+                       className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between h-full bg-card"
+                     >
+                       <AddressText address={m.address} className="text-sm" />
+                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                         <span>Tier: {m.tier}</span>
+                         <div className="flex flex-wrap gap-1">
+                           {m.roles.map((r) => (
+                             <button
+                               key={r}
+                               type="button"
+                               className="inline-flex items-center rounded-md border border-transparent bg-secondary px-2 py-0.5 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                               onClick={() => requestRoleRemoval(m, r)}
+                               aria-label={`Remove ${r} role from ${m.address}`}
+                               title={`Remove ${r} role`}
+                             >
+                               {r} <span aria-hidden="true">✕</span>
+                             </button>
+                           ))}
+                         </div>
+                         {pendingAssignment?.address.toLowerCase() ===
+                           m.address.toLowerCase() && (
+                           <Badge variant="warning">Saving</Badge>
+                         )}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+                 
+                 <div className="flex items-center justify-between border-t pt-4">
+                    <div className="text-sm text-muted-foreground">
+                      Page {currentPage} of {totalPages} ({filteredMembers.length} members)
                     </div>
-                  )}
-                />
-                {isFetchingNextPage && (
-                  <div className="text-center py-2 text-xs text-muted-foreground">
-                    Loading more members…
-                  </div>
-                )}
-              </div>
-            )}
+                    <div className="flex items-center gap-2">
+                       <Select
+                          value={String(pageSize)}
+                          onChange={(e) => setPageSize(Number(e.target.value))}
+                       >
+                          <option value="25">25 per page</option>
+                          <option value="50">50 per page</option>
+                          <option value="100">100 per page</option>
+                       </Select>
+                       <Button variant="outline" size="sm" onClick={prevPage} disabled={currentPage === 1}>
+                         Previous
+                       </Button>
+                       <Button variant="outline" size="sm" onClick={nextPage} disabled={currentPage === totalPages}>
+                         Next
+                       </Button>
+                    </div>
+                 </div>
+
+                 {isFetchingNextPage && (
+                   <div className="text-center py-2 text-xs text-muted-foreground">
+                     Loading more members…
+                   </div>
+                 )}
+               </div>
+             )}
+
           </CardContent>
         </Card>
       </div>
