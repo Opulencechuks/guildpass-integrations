@@ -36,6 +36,7 @@ import {
   MembershipTier,
   PaginatedMembers,
   Resource,
+  ResourceLookupResult,
   Role,
   Session,
   SiweAuthSession,
@@ -598,10 +599,12 @@ export class MockAccessApi implements AccessApi {
     return policies.map((p) => ({ ...p, roles: p.roles ?? [] }))
   }
 
-  async getResource(id: string): Promise<Resource | null> {
+  async getResource(id: string): Promise<Resource | ResourceLookupResult | null> {
     await initPromise
     const r = resources.find((x) => x.id === id)
-    return r ? { ...r, roles: r.roles ?? [] } : null
+    return r
+      ? { status: 'found', data: { ...r, roles: r.roles ?? [] }, source: 'direct' }
+      : { status: 'not_found' }
   }
 
   async getPolicy(resourceId: string): Promise<AccessPolicy | null> {
