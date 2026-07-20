@@ -12,6 +12,7 @@ import {
   MembershipTier,
   PaginatedMembers,
   Resource,
+  ResourceLookupResult,
   Role,
   Session,
   SiweAuthSession,
@@ -21,6 +22,7 @@ import {
   BackendResource,
   BackendPolicy,
   WebhookEventLog,
+  WebhookEventUnsubscribe,
   SessionSchema,
   CommunitySchema,
   MembershipSchema,
@@ -63,6 +65,136 @@ import { PolicyValidationError, validatePolicy } from '../validation/policy'
 import { config } from '../config'
 
 const BASE = config.apiUrl
+
+type CircuitState = 'closed' | 'open' | 'half-open'
+
+interface CircuitEntry {
+  state: CircuitState
+  failures: number[]
+  openedAt?: number
+  halfOpenProbeInFlight: boolean
+}
+
+const RETRY_MAX_ATTEMPTS = Number(
+  process.env.NEXT_PUBLIC_API_RETRY_MAX_ATTEMPTS ?? 3,
+)
+const RETRY_BASE_DELAY_MS = Number(
+  process.env.NEXT_PUBLIC_API_RETRY_BASE_DELAY_MS ?? 100,
+)
+const RETRY_MAX_DELAY_MS = Number(
+  process.env.NEXT_PUBLIC_API_RETRY_MAX_DELAY_MS ?? 1_000,
+)
+const CIRCUIT_FAILURE_THRESHOLD = Number(
+  process.env.NEXT_PUBLIC_API_CIRCUIT_FAILURE_THRESHOLD ?? 3,
+)
+const CIRCUIT_FAILURE_WINDOW_MS = Number(
+  process.env.NEXT_PUBLIC_API_CIRCUIT_FAILURE_WINDOW_MS ?? 30_000,
+)
+const CIRCUIT_COOLDOWN_MS = Number(
+  process.env.NEXT_PUBLIC_API_CIRCUIT_COOLDOWN_MS ?? 10_000,
+)
+
+const circuitBreakers = new Map<string, CircuitEntry>()
+
+function requestMethod(init?: RequestInit): string {
+  return (init?.method ?? 'GET').toUpperCase()
+}
+
+function shouldRetryRequest(init?: RequestInit): boolean {
+  return requestMethod(init) === 'GET'
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function backoffDelayMs(attemptIndex: number): number {
+  const exponentialDelay = Math.min(
+    RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attemptIndex - 1),
+    RETRY_MAX_DELAY_MS,
+  )
+  const jitter = Math.floor(Math.random() * exponentialDelay * 0.25)
+  return exponentialDelay + jitter
+}
+
+function getCircuit(path: string): CircuitEntry {
+  let circuit = circuitBreakers.get(path)
+  if (!circuit) {
+    circuit = { state: 'closed', failures: [], halfOpenProbeInFlight: false }
+    circuitBreakers.set(path, circuit)
+  }
+  return circuit
+}
+
+function serviceUnavailableError(path: string): ApiError {
+  return new ApiError({
+    status: 503,
+    code: 'service_unavailable',
+    safeMessage: 'Service temporarily unavailable. Please try again shortly.',
+    path,
+    retryable: true,
+  })
+}
+
+function assertCircuitAllowsRequest(path: string): void {
+  const circuit = getCircuit(path)
+  if (circuit.state !== 'open') {
+    return
+  }
+
+  const openedAt = circuit.openedAt ?? 0
+  if (Date.now() - openedAt >= CIRCUIT_COOLDOWN_MS) {
+    circuit.state = 'half-open'
+    circuit.halfOpenProbeInFlight = false
+  } else {
+    throw serviceUnavailableError(path)
+  }
+
+  if (circuit.halfOpenProbeInFlight) {
+    throw serviceUnavailableError(path)
+  }
+  circuit.halfOpenProbeInFlight = true
+}
+
+function recordCircuitSuccess(path: string): void {
+  const circuit = getCircuit(path)
+  circuit.state = 'closed'
+  circuit.failures = []
+  circuit.openedAt = undefined
+  circuit.halfOpenProbeInFlight = false
+}
+
+function recordCircuitFailure(path: string): void {
+  const now = Date.now()
+  const circuit = getCircuit(path)
+  circuit.failures = circuit.failures.filter(
+    (failureAt) => now - failureAt <= CIRCUIT_FAILURE_WINDOW_MS,
+  )
+  circuit.failures.push(now)
+  circuit.halfOpenProbeInFlight = false
+
+  if (
+    circuit.state === 'half-open' ||
+    circuit.failures.length >= CIRCUIT_FAILURE_THRESHOLD
+  ) {
+    circuit.state = 'open'
+    circuit.openedAt = now
+  }
+}
+
+function isRetryableError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.retryable &&
+    (err.code === 'network_error' ||
+      err.code === 'server_error' ||
+      err.code === 'rate_limited')
+  )
+}
+
+export function resetLiveApiResilienceState(): void {
+  circuitBreakers.clear()
+}
 
 function createApiError(status: number, body?: ApiErrorBody, path?: string): ApiError {
   const details =
@@ -163,6 +295,24 @@ async function parseErrorBody(
   } catch {
     return undefined
   }
+}
+
+function parseSseEvent(chunk: string): WebhookEventLog[] {
+  return chunk
+    .split('\n\n')
+    .map((block) => {
+      const data = block
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n')
+
+      if (!data || data === '[DONE]') return null
+      const parsed = JSON.parse(data)
+      WebhookEventLogSchema.parse(parsed)
+      return mapWebhookEvent(parsed)
+    })
+    .filter((event): event is WebhookEventLog => event !== null)
 }
 
 function normalizeResponseKeys(data: any): any {
@@ -310,9 +460,43 @@ async function request<T>(
       cause,
     })
   }
+}
 
-  if (!res.ok) {
-    throw createApiError(res.status, await parseErrorBody(res), path)
+async function getJson<T>(path: string, init?: RequestInit, schema?: z.ZodType<any>): Promise<T> {
+  const retriesEnabled = shouldRetryRequest(init)
+  let res!: Response
+
+  if (retriesEnabled) {
+    assertCircuitAllowsRequest(path)
+  }
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      res = await fetchCore(path, init)
+
+      if (!res.ok) {
+        throw createApiError(res.status, await parseErrorBody(res), path)
+      }
+
+      if (retriesEnabled) {
+        recordCircuitSuccess(path)
+      }
+      break
+    } catch (err) {
+      const canRetry =
+        retriesEnabled &&
+        isRetryableError(err) &&
+        attempt < RETRY_MAX_ATTEMPTS
+
+      if (!canRetry) {
+        if (retriesEnabled && isRetryableError(err)) {
+          recordCircuitFailure(path)
+        }
+        throw err
+      }
+
+      await sleep(backoffDelayMs(attempt))
+    }
   }
 
   if (res.status === 204 || res.status === 205) {
@@ -475,23 +659,49 @@ export class LiveAccessApi implements AccessApi {
     return raw.map(mapPolicy)
   }
 
-  async getResource(id: string): Promise<Resource | null> {
+  async getResource(id: string): Promise<ResourceLookupResult> {
     const path = `/v1/resources/${encodeURIComponent(id)}`
     try {
       const raw = await getJson<BackendResource>(path, undefined, ResourceSchema)
       if (raw && Object.keys(raw).length > 0) {
         validateResourceResponse(raw, path)
-        return mapResource(raw)
+        return { status: 'found', data: mapResource(raw), source: 'direct' }
       }
     } catch (err) {
       if (!(err instanceof ApiError && err.status === 404)) {
-        throw err
+        return {
+          status: 'error',
+          error: err instanceof ApiError
+            ? err
+            : new ApiError({
+              code: 'unknown_error',
+              safeMessage: 'Request failed.',
+              path,
+              cause: err,
+            }),
+        }
       }
     }
 
     // Fallback for older backends or if direct lookup returned empty/404
-    const list = await this.listResources()
-    return list.find((r) => r.id === id) ?? null
+    try {
+      const list = await this.listResources()
+      const resource = list.find((r) => r.id === id)
+      return resource
+        ? { status: 'found', data: resource, source: 'fallback' }
+        : { status: 'not_found' }
+    } catch (err) {
+      return {
+        status: 'error',
+        error: err instanceof ApiError
+          ? err
+          : new ApiError({
+            code: 'unknown_error',
+            safeMessage: 'Request failed.',
+            cause: err,
+          }),
+      }
+    }
   }
 
   async getPolicy(resourceId: string): Promise<AccessPolicy | null> {
@@ -523,6 +733,60 @@ export class LiveAccessApi implements AccessApi {
     }, z.array(WebhookEventLogSchema))
     validateWebhookEventsResponse(raw, path)
     return raw.map(mapWebhookEvent)
+  }
+
+  subscribeWebhookEvents(
+    onEvent: (event: WebhookEventLog) => void,
+    onError?: (error: unknown) => void,
+  ): WebhookEventUnsubscribe {
+    const path = '/v1/admin/events/stream'
+    const controller = new AbortController()
+    let buffer = ''
+
+    /**
+     * PROVISIONAL — `GET /v1/admin/events/stream` is a proposed guildpass-core
+     * SSE endpoint. It should return `text/event-stream` frames whose `data:`
+     * payload is a single WebhookEventLog object. Until the backend ships this
+     * contract, failures are intentionally reported to the caller so the UI can
+     * silently resume the existing `/v1/admin/events` polling behavior.
+     */
+    fetch(`${BASE}${path}`, {
+      method: 'GET',
+      headers: {
+        ...this.authHeaders(),
+        Accept: 'text/event-stream',
+      },
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok || !res.body) {
+          const body = await parseErrorBody(res).catch(() => undefined)
+          throw createApiError(res.status, body, path)
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+
+        while (!controller.signal.aborted) {
+          const { done, value } = await reader.read()
+          if (done) {
+            throw new Error('Admin events stream closed before unsubscribe')
+          }
+          buffer += decoder.decode(value, { stream: true })
+          const frames = buffer.split('\n\n')
+          buffer = frames.pop() ?? ''
+          for (const frame of frames) {
+            for (const event of parseSseEvent(frame)) {
+              onEvent(event)
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted) onError?.(err)
+      })
+
+    return () => controller.abort()
   }
 
   /**

@@ -3,6 +3,7 @@
   "compilerOptions": {
     "module": "CommonJS",
     "moduleResolution": "Node10",
+    "allowJs": true,
     "noEmit": false,
     "outDir": "../test-dist",
     "rootDir": "..",
@@ -28,13 +29,12 @@
     "../components/wallet/address-text.tsx",
     "../components/nav.tsx",
     "../app/admin/analytics/page.tsx",
+    "../components/admin-guard.tsx",
+    "../components/wallet/address-text.tsx",
+    "../lib/wallet/siwe-context.ts",
     "../lib/query/*.ts",
     "../types/**/*.d.ts",
-    "./*.test.ts",
-    "./*.test.tsx"
-  ],
-  "exclude": [
-    "node_modules",
-    "../node_modules"
+    "../scripts/sync-api-types.js",
+    "./*.test.ts"
   ]
 }

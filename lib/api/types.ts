@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { ApiError } from './errors'
 
 export type Role = 'member' | 'moderator' | 'admin'
 
@@ -122,6 +123,12 @@ export interface Resource {
   content?: ResourceContentBlock[]
 }
 
+export type ResourceLookupResult =
+  | { status: 'found'; data: Resource; source: 'direct' | 'fallback' }
+  | { status: 'not_found' }
+  | { status: 'error'; error: ApiError }
+
+
 export const ResourceSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -224,6 +231,8 @@ export type WebhookEventType =
   | 'membership.expired' 
   | 'tier.upgraded' 
   | 'policy.updated';
+
+export type WebhookEventUnsubscribe = () => void
 
 export interface WebhookEventLog {
   id: string;
@@ -446,7 +455,7 @@ export interface MemberAccessApi {
   listMembers(params?: { cursor?: string; limit?: number; filter?: string }): Promise<MemberRow[] | PaginatedMembers>
   listResources(): Promise<Resource[]>
   listPolicies(): Promise<AccessPolicy[]>
-  getResource(id: string): Promise<Resource | null>
+  getResource(id: string): Promise<ResourceLookupResult>
   getPolicy(resourceId: string): Promise<AccessPolicy | null>
 }
 
@@ -457,6 +466,17 @@ export interface MemberAccessApi {
 export interface AdminAccessApi {
   // ── Admin queries & mutations (require a valid SIWE token context) ────────
   listWebhookEvents(): Promise<WebhookEventLog[]>
+  /**
+   * Subscribe to the admin webhook event stream.
+   *
+   * @provisional Live mode attempts `GET /v1/admin/events/stream` as an
+   * SSE-compatible stream. If setup fails, the caller should fall back to
+   * `listWebhookEvents()` polling.
+   */
+  subscribeWebhookEvents(
+    onEvent: (event: WebhookEventLog) => void,
+    onError?: (error: unknown) => void,
+  ): WebhookEventUnsubscribe
   /**
    * Fetch the analytics summary for the admin dashboard.
    *

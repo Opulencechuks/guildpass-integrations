@@ -13,8 +13,8 @@
  *
  * Session simulation:
  *  Set NEXT_PUBLIC_MOCK_SESSION_STATE to control the simulated auth boundary:
- *    "expired"         — siweVerify returns an already-expired token; admin
- *                        mutations (assignRole/updatePolicy) throw a 401 ApiError
+ *    "expired"         — siweVerify returns an already-expired access token
+ *                        with a valid refresh token so renewal can be tested
  *    "unauthenticated" — siweVerify always throws, simulating a backend rejection
  *    (default)         — normal mock behaviour (instant auth, 1-hour token)
  *
@@ -36,11 +36,13 @@ import {
   MembershipTier,
   PaginatedMembers,
   Resource,
+  ResourceLookupResult,
   Role,
   Session,
   SiweAuthSession,
   WalletVerification,
   WebhookEventLog,
+  WebhookEventUnsubscribe,
 } from './types'
 import { ApiError } from './errors'
 import {
@@ -259,6 +261,23 @@ let policies: AccessPolicy[] = [...DEFAULT_POLICIES]
 let mockWebhookEvents: WebhookEventLog[] = [...DEFAULT_WEBHOOK_EVENTS]
 let memberStore: Record<string, { membership: Membership; roles: Role[]; profile: MemberProfile }> = { ...DEFAULT_MEMBER_STORE }
 
+function createMockStreamEvent(): WebhookEventLog {
+  const base = DEFAULT_WEBHOOK_EVENTS[Math.floor(Math.random() * DEFAULT_WEBHOOK_EVENTS.length)]
+  const statuses: WebhookEventLog['status'][] = ['success', 'pending', 'failed']
+  const event: WebhookEventLog = {
+    ...base,
+    id: `stream_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    timestamp: new Date().toISOString(),
+    status: statuses[Math.floor(Math.random() * statuses.length)],
+    isReplay: false,
+    fullPayload: {
+      ...(base.fullPayload ?? base.payloadSummary),
+      source: 'mock-sse-stream',
+    },
+  }
+  mockWebhookEvents.unshift(event)
+  return event
+}
 let saveTimeout: ReturnType<typeof setTimeout> | null = null
 
 const initPromise = loadPersistedState().then((persisted) => {
@@ -598,10 +617,12 @@ export class MockAccessApi implements AccessApi {
     return policies.map((p) => ({ ...p, roles: p.roles ?? [] }))
   }
 
-  async getResource(id: string): Promise<Resource | null> {
+  async getResource(id: string): Promise<Resource | ResourceLookupResult | null> {
     await initPromise
     const r = resources.find((x) => x.id === id)
-    return r ? { ...r, roles: r.roles ?? [] } : null
+    return r
+      ? { status: 'found', data: { ...r, roles: r.roles ?? [] }, source: 'direct' }
+      : { status: 'not_found' }
   }
 
   async getPolicy(resourceId: string): Promise<AccessPolicy | null> {
@@ -615,6 +636,15 @@ export class MockAccessApi implements AccessApi {
   async listWebhookEvents(): Promise<WebhookEventLog[]> {
     await initPromise
     return new Promise((resolve) => setTimeout(() => resolve(mockWebhookEvents), 300))
+  }
+
+  subscribeWebhookEvents(onEvent: (event: WebhookEventLog) => void): WebhookEventUnsubscribe {
+    const intervalId = globalThis.setInterval(() => {
+      onEvent(createMockStreamEvent())
+    }, 5000)
+
+    globalThis.setTimeout(() => onEvent(createMockStreamEvent()), 1000)
+    return () => globalThis.clearInterval(intervalId)
   }
 
   /**
@@ -748,7 +778,7 @@ export class MockAccessApi implements AccessApi {
    * Throws a 401 if the token is missing or malformed to demonstrate the
    * "refresh failed → sign-out" flow in tests.
    *
-   * Set NEXT_PUBLIC_MOCK_SESSION_STATE=expired to force siweRefresh to also
+   * Set NEXT_PUBLIC_MOCK_SESSION_STATE=refresh-expired to force siweRefresh to
    * fail (simulates a fully-expired or revoked refresh token).
    */
   async siweRefresh(refreshToken: string): Promise<SiweAuthSession> {
